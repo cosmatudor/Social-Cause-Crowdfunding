@@ -1,7 +1,35 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import {PriceConverter} from "./PriceConverter.sol";
+
+/**
+ * @title
+ * @author
+ * @notice
+ * @dev
+ */
 contract Crowdfunding {
+    using PriceConverter for uint256;
+
+    /* State variables */
+    struct Campaign {
+        string title;
+        string description;
+        uint256 targetAmount;
+        uint256 currentAmount;
+        mapping(address => uint256) contributions;
+        uint256 deadline;
+    }
+
+    mapping(uint256 => Campaign) public campaigns;
+    uint256 public numberOfCampaigns;
+    address public owner;
+    uint256 public constant MINIMUM_USD = 5 * 1e18; // $5
+    AggregatorV3Interface private priceFeed;
+
+    /* Events */
     event CampaignCreated(
         uint256 campaignId,
         string _title,
@@ -17,27 +45,15 @@ contract Crowdfunding {
         uint256 amount
     );
 
-    struct Campaign {
-        string title;
-        string description;
-        uint256 targetAmount;
-        uint256 currentAmount;
-        mapping(address => uint256) contributions;
-        uint256 deadline;
-    }
-
-    mapping(uint256 => Campaign) public campaigns;
-    uint256 public numberOfCampaigns;
-
-    address public owner;
-
-    constructor() {
-        owner = msg.sender;
-    }
-
+    /* Modifiers */
     modifier onlyOwner() {
         require(msg.sender == owner, "Only the owner is permited!");
         _;
+    }
+
+    constructor(address _priceFeedAddress) {
+        owner = msg.sender;
+        priceFeed = AggregatorV3Interface(_priceFeedAddress);
     }
 
     function addCampaign(
@@ -78,6 +94,10 @@ contract Crowdfunding {
         require(
             campaign.currentAmount < campaign.targetAmount,
             "Campaign is already funded"
+        );
+        require(
+            msg.value.getConversionRate(priceFeed) >= MINIMUM_USD,
+            "Minimum donation amount should be $5!"
         );
 
         campaign.currentAmount += msg.value;

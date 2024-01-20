@@ -5,10 +5,9 @@ import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/Ag
 import {PriceConverter} from "./PriceConverter.sol";
 
 /**
- * @title
- * @author
- * @notice
- * @dev
+ * @title Crowdfunding Contract
+ * @author Cosma Tudor Mihai
+ * @notice This contract allows users to contribute to crowdfunding campaigns.
  */
 contract Crowdfunding {
     using PriceConverter for uint256;
@@ -41,6 +40,12 @@ contract Crowdfunding {
 
     event DonationSent(
         address indexed donor,
+        uint256 indexed campaignId,
+        uint256 amount
+    );
+
+    event Refunded(
+        address refunder,
         uint256 indexed campaignId,
         uint256 amount
     );
@@ -88,22 +93,46 @@ contract Crowdfunding {
         );
     }
 
-    function donate(uint _campaignId) public payable {
+    function donate(uint256 _campaignId) public payable {
         Campaign storage campaign = campaigns[_campaignId];
         require(block.timestamp < campaign.deadline, "Campaign is closed");
         require(
             campaign.currentAmount < campaign.targetAmount,
             "Campaign is already funded"
         );
+        uint256 conversionRate = msg.value.getConversionRate(priceFeed);
         require(
-            msg.value.getConversionRate(priceFeed) >= MINIMUM_USD,
+            conversionRate >= MINIMUM_USD,
             "Minimum donation amount should be $5!"
         );
 
-        campaign.currentAmount += msg.value;
+        uint256 newCurrentAmount = campaign.currentAmount + msg.value;
+        campaign.currentAmount = newCurrentAmount;
         campaign.contributions[msg.sender] += msg.value;
 
         emit DonationSent(msg.sender, _campaignId, msg.value);
+    }
+
+    function refund(uint256 _campaignId) public {
+        Campaign storage campaign = campaigns[_campaignId];
+        require(
+            block.timestamp > campaign.deadline,
+            "Campaign is still active"
+        );
+        require(
+            campaign.currentAmount < campaign.targetAmount,
+            "Campaign is funded"
+        );
+
+        uint256 contribution = campaign.contributions[msg.sender];
+        require(contribution > 0, "No contribution made");
+
+        // reduce to 0 the contribution
+        campaign.contributions[msg.sender] = 0;
+        (bool success, ) = msg.sender.call{value: contribution}("");
+        require(success, "Refund reverted");
+
+        emit Refunded(msg.sender, _campaignId, contribution);
     }
 
     /**
@@ -122,7 +151,7 @@ contract Crowdfunding {
     }
 
     /* Getters */
-    function getCampaign(
+    function getCampaignDetails(
         uint256 _campaignId
     )
         public
@@ -141,6 +170,21 @@ contract Crowdfunding {
         targetAmount = campaign.targetAmount;
         currentAmount = campaign.currentAmount;
         deadline = campaign.deadline;
+    }
+
+    function getCampaignContributions(
+        uint256 _campaignId,
+        address _contributor
+    ) public view returns (uint256) {
+        Campaign storage campaign = campaigns[_campaignId];
+        return campaign.contributions[_contributor];
+    }
+
+    function getRaisedAmountForCampaign(
+        uint256 _campaignId
+    ) public view returns (uint256) {
+        Campaign storage campaign = campaigns[_campaignId];
+        return campaign.currentAmount;
     }
 
     function getCampaignAvailability(
